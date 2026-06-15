@@ -59,9 +59,9 @@ export default function TeamManagerLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 p-4 md:p-6 text-slate-800 font-sans antialiased flex items-center justify-center">
-      <div className="w-full max-w-6xl bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden flex flex-col text-xs">
-        
+  <div className="min-h-screen bg-white text-slate-800 font-sans antialiased flex flex-col">
+    <div className="w-full flex-1 flex flex-col text-xs">
+
         {/* TOPBAR */}
         <div className="bg-slate-50 border-bottom border-slate-200 px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -83,7 +83,7 @@ export default function TeamManagerLayout() {
         </div>
 
         {/* WORKSPACE BODY */}
-        <div className="flex min-h-[580px] flex-col md:flex-row">
+<div className="flex flex-1 flex-col md:flex-row">
           
           {/* SIDEBAR NAVIGATION */}
           <div className="w-full md:w-44 bg-white border-r border-slate-200/80 py-3 flex flex-col justify-between shrink-0">
