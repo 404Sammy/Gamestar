@@ -14,15 +14,14 @@ import {
 } from "lucide-react";
 
 interface Pool {
-  id: number;
+  id: string; 
   name: string;
 }
 
 interface Team {
-  id: number;
+  id: string; 
   name: string;
-  pool_id: number | null;
-  // Dynamic UI cosmetic extensions
+  pool_name: string | null; 
   played?: number;
   won?: number;
   drawn?: number;
@@ -33,14 +32,14 @@ interface Team {
 export default function TournamentStandingsPage() {
   const [pools, setPools] = useState<Pool[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [activeTournamentId, setActiveTournamentId] = useState<number | null>(null);
+  const [activeTournamentId, setActiveTournamentId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   async function fetchStandingsData() {
     try {
       setLoading(true);
 
-      // 1. Fetch current active context parameters safely
+      // 1. Safely fetch the current active administration context row
       const { data: contextData, error: contextError } = await supabase
         .from("admin_context")
         .select("active_tournament_id")
@@ -52,22 +51,33 @@ export default function TournamentStandingsPage() {
       const tournamentId = contextData?.active_tournament_id || null;
       setActiveTournamentId(tournamentId);
 
-      if (!tournamentId) return;
+      // 2. Prepare the base query for teams
+      let teamsQuery = supabase.from("teams").select("id, name, pool_name");
+      
+      // Regular expression to validate if the string is a legitimate 36-character UUID
+      const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-      // 2. Fetch pools and teams simultaneously
+      // CRITICAL SAFETY STAGE: Only filter if it's a valid UUID string
+      if (tournamentId && isValidUUID.test(tournamentId)) {
+        teamsQuery = teamsQuery.eq("tournament_id", tournamentId);
+      } else {
+        console.warn("⚠️ No active tournament UUID set in admin_context. Loading all teams as a fallback.");
+      }
+
+      // Execute queries concurrently
       const [poolsResponse, teamsResponse] = await Promise.all([
-        supabase.from("pools").select("id, name").eq("tournament_id", tournamentId),
-        supabase.from("teams").select("id, name, pool_id").eq("tournament_id", tournamentId)
+        supabase.from("pools").select("id, name"), 
+        teamsQuery
       ]);
 
       if (poolsResponse.error) throw poolsResponse.error;
       if (teamsResponse.error) throw teamsResponse.error;
 
-      setPools(poolsResponse.data || []);
-      
-      // Seed teams with cosmetic initial leaderboard points for structural presentation
-      const enrichedTeams = (teamsResponse.data || []).map((team, idx) => ({
-        ...team,
+      // 3. Map teams and apply placeholder presentation point structures
+      const enrichedTeams = (teamsResponse.data || []).map((team: any, idx) => ({
+        id: team.id,
+        name: team.name,
+        pool_name: team.pool_name,
         played: idx % 2 === 0 ? 3 : 2,
         won: idx % 3 === 0 ? 2 : 1,
         drawn: idx % 4 === 0 ? 1 : 0,
@@ -75,9 +85,20 @@ export default function TournamentStandingsPage() {
         points: idx % 3 === 0 ? 7 : 3,
       }));
 
-      // Sort teams right away by points descending
+      // Sort teams descending by performance point clusters
       enrichedTeams.sort((a, b) => (b.points || 0) - (a.points || 0));
       setTeams(enrichedTeams);
+
+      // 4. Group only the pools that are currently occupied by loaded teams
+      const activePoolNames = new Set(
+        enrichedTeams.map(t => t.pool_name?.trim().toLowerCase()).filter(Boolean)
+      );
+      
+      const relevantPools = (poolsResponse.data || []).filter(pool => 
+        pool.name && activePoolNames.has(pool.name.trim().toLowerCase())
+      );
+
+      setPools(relevantPools);
 
     } catch (err: any) {
       console.error("Standings data cross-reference error matrix:", err?.message || err);
@@ -104,7 +125,6 @@ export default function TournamentStandingsPage() {
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
-      {/* Title Header Context */}
       <div>
         <h1 className="text-lg font-bold tracking-tight text-slate-900">Tournament Standings</h1>
         <p className="text-xs text-slate-500 mt-0.5 font-medium">
@@ -112,28 +132,23 @@ export default function TournamentStandingsPage() {
         </p>
       </div>
 
-      {!activeTournamentId ? (
-        <Card className="bg-amber-50/40 border-amber-200/60 shadow-sm">
-          <CardContent className="p-6 text-center text-xs font-medium text-amber-800 flex items-center justify-center gap-2">
-            <ShieldAlert className="h-4 w-4 text-amber-600" />
-            <span>No active tournament loaded. Select a running console setup inside the main Dashboard to begin mapping scores.</span>
-          </CardContent>
-        </Card>
-      ) : pools.length === 0 ? (
+      {pools.length === 0 ? (
         <Card className="border-dashed border-slate-200 bg-white">
           <CardContent className="p-12 text-center text-xs font-medium text-slate-400 flex flex-col items-center justify-center gap-1.5">
             <HelpCircle className="h-6 w-6 text-slate-300" />
-            <span>No pool clusters configured yet. Initialize pools and allocate teams to generate real-time leaderboards.</span>
+            <span>No active teams found matching the available pool structures. Check your team allocations.</span>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-6">
           {pools.map((pool) => {
-            const poolTeams = teams.filter((t) => t.pool_id === pool.id);
+            // Case-insensitive filtering to seamlessly join "Pool WA" with "POOL WA" rows
+            const poolTeams = teams.filter(
+              (t) => t.pool_name?.trim().toLowerCase() === pool.name?.trim().toLowerCase()
+            );
 
             return (
               <Card key={pool.id} className="bg-white border-slate-200 shadow-sm overflow-hidden">
-                {/* Pool Header Band */}
                 <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
                   <h2 className="text-xs font-bold text-slate-700 tracking-wide uppercase flex items-center gap-1.5">
                     <BarChart4 className="h-3.5 w-3.5 text-[#534AB7]" />
@@ -167,7 +182,6 @@ export default function TournamentStandingsPage() {
                           const position = index + 1;
                           return (
                             <tr key={team.id} className="hover:bg-slate-50/40 transition-colors">
-                              {/* Position Marker */}
                               <td className="py-2.5 pl-4 text-center font-bold">
                                 {position === 1 ? (
                                   <div className="flex justify-center"><Trophy className="h-3.5 w-3.5 text-amber-500" /></div>
@@ -177,19 +191,13 @@ export default function TournamentStandingsPage() {
                                   <span className="text-slate-400 text-[11px]">{position}</span>
                                 )}
                               </td>
-                              
-                              {/* Team Name */}
                               <td className="py-2.5 px-3 font-semibold text-slate-900">
                                 {team.name}
                               </td>
-                              
-                              {/* Matches Played / Metrics */}
                               <td className="py-2.5 px-2 text-center font-medium text-slate-500">{team.played}</td>
                               <td className="py-2.5 px-2 text-center font-medium text-slate-600">{team.won}</td>
                               <td className="py-2.5 px-2 text-center font-medium text-slate-600">{team.drawn}</td>
                               <td className="py-2.5 px-2 text-center font-medium text-slate-600">{team.lost}</td>
-                              
-                              {/* Points Score Column */}
                               <td className="py-2.5 pr-4 text-center font-black text-slate-900 text-sm">{team.points}</td>
                             </tr>
                           );

@@ -19,17 +19,17 @@ import {
 } from "lucide-react";
 
 interface Stage {
-  id: number;
+  id: string; // Type-aligned to standard database UUID strings
   name: string;
-  tournament_id: number;
-  sequence_order: number;
+  tournament_id: string;
+  created_at?: string;
   status: "Pending" | "Active" | "Completed";
   type: string;
 }
 
 export default function TournamentStagesPage() {
   const [stages, setStages] = useState<Stage[]>([]);
-  const [activeTournamentId, setActiveTournamentId] = useState<number | null>(null);
+  const [activeTournamentId, setActiveTournamentId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   
   // Form State parameters
@@ -41,7 +41,7 @@ export default function TournamentStagesPage() {
     try {
       setLoading(true);
 
-      // 1. Resolve current active context parameters globally with .maybeSingle()
+      // 1. Resolve current active context parameters globally (id is integer 1)
       const { data: contextData, error: contextError } = await supabase
         .from("admin_context")
         .select("active_tournament_id")
@@ -62,18 +62,25 @@ export default function TournamentStagesPage() {
         return;
       }
 
-      // 2. Fetch all stages associated with the targeted active configuration
+      // 2. Validate UUID format cleanly before hitting the database
+      const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!isValidUUID.test(tournamentId)) {
+        console.warn("Retrieved active_tournament_id is not a valid UUID format:", tournamentId);
+        setStages([]);
+        return;
+      }
+
+      // 3. Query stages ordered safely by creation timeline sequence
       const { data: stagesData, error: stagesError } = await supabase
         .from("stages")
         .select("*")
         .eq("tournament_id", tournamentId)
-        .order("sequence_order", { ascending: true });
+        .order("created_at", { ascending: true }); // Safe operational fallback sorting
 
       if (stagesError) throw stagesError;
       setStages(stagesData || []);
 
     } catch (err: any) {
-      // Clean string parsing wrapper bypasses native JS console logging '{}' bug
       console.error("Stages data resolution engine system crash:", err?.message || err);
       toast.error("Failed to sync system schedule timeline rounds.");
     } finally {
@@ -90,20 +97,16 @@ export default function TournamentStagesPage() {
     }
 
     try {
-      const nextSequence = stages.length > 0 ? Math.max(...stages.map(s => s.sequence_order)) + 1 : 1;
-
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("stages")
         .insert([
           {
             name: newStageName.trim(),
             tournament_id: activeTournamentId,
-            sequence_order: nextSequence,
             status: "Pending",
             type: newStageType
           }
-        ])
-        .select();
+        ]);
 
       if (error) throw error;
 
@@ -117,7 +120,7 @@ export default function TournamentStagesPage() {
   }
 
   // Handle structural cleanup deletion routines
-  async function handleDeleteStage(id: number, name: string) {
+  async function handleDeleteStage(id: string, name: string) {
     if (!confirm(`Are you completely sure you want to permanently erase stage "${name}"?`)) return;
 
     try {
@@ -153,7 +156,6 @@ export default function TournamentStagesPage() {
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
-      {/* Structural Context Panel Header */}
       <div>
         <h1 className="text-lg font-bold tracking-tight text-slate-900">Tournament Stages</h1>
         <p className="text-xs text-slate-500 mt-0.5 font-medium">
@@ -237,7 +239,6 @@ export default function TournamentStagesPage() {
                 <div className="relative border-l-2 border-slate-100 ml-3.5 pl-5 space-y-4 py-1">
                   {stages.map((stage, idx) => (
                     <div key={stage.id} className="relative group">
-                      {/* Chronological Counter Tracker Node */}
                       <span className="absolute -left-[29px] top-0.5 h-4 w-4 rounded-full bg-white border-2 border-[#534AB7] flex items-center justify-center text-[9px] font-bold text-[#3C3489] group-hover:bg-[#EEEDFE] transition-colors z-10">
                         {idx + 1}
                       </span>
@@ -253,7 +254,7 @@ export default function TournamentStagesPage() {
                           
                           <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
                             <Calendar className="h-3 w-3" />
-                            <span>Sequence Execution weight: {stage.sequence_order}</span>
+                            <span>Node Established</span>
                             <ChevronRight className="h-2.5 w-2.5" />
                             <span className={stage.status === "Active" ? "text-emerald-600" : "text-slate-400"}>
                               {stage.status}
@@ -261,7 +262,6 @@ export default function TournamentStagesPage() {
                           </div>
                         </div>
 
-                        {/* Node Administration Core Controls */}
                         <Button
                           onClick={() => handleDeleteStage(stage.id, stage.name)}
                           variant="ghost"

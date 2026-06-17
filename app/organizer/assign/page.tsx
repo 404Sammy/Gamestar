@@ -3,10 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { 
-  GitMerge, 
   Radio, 
   ShieldAlert, 
   Users, 
@@ -17,22 +15,23 @@ import {
 } from "lucide-react";
 
 interface Team {
-  id: number;
+  id: string; // Type-aligned to database UUID string layout
   name: string;
-  pool_id: number | null;
+  pool_name: string | null; // Database column tracking assignments
 }
 
 interface Pool {
-  id: number;
+  id: string; // Type-aligned to database UUID string layout
   name: string;
+  category: string;
 }
 
 export default function TeamAssignmentPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [pools, setPools] = useState<Pool[]>([]);
-  const [activeTournamentId, setActiveTournamentId] = useState<number | null>(null);
+  const [activeTournamentId, setActiveTournamentId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
 
   // Fetch contextual reference points and pool routing structures
   async function fetchAssignmentData() {
@@ -53,10 +52,17 @@ export default function TeamAssignmentPage() {
 
       if (!tournamentId) return;
 
-      // 2. Parallel data fetching pipeline for pools and teams
+      // 2. Parallel data fetching pipeline matching your exact database snapshots
+      let teamsQuery = supabase.from("teams").select("id, name, pool_name");
+      
+      const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (tournamentId && isValidUUID.test(tournamentId)) {
+        teamsQuery = teamsQuery.eq("tournament_id", tournamentId);
+      }
+
       const [poolsResponse, teamsResponse] = await Promise.all([
-        supabase.from("pools").select("id, name").eq("tournament_id", tournamentId),
-        supabase.from("teams").select("id, name, pool_id").eq("tournament_id", tournamentId)
+        supabase.from("pools").select("id, name, category"), // Pull all pools globally (no tournament column)
+        teamsQuery
       ]);
 
       if (poolsResponse.error) throw poolsResponse.error;
@@ -66,7 +72,6 @@ export default function TeamAssignmentPage() {
       setTeams(teamsResponse.data || []);
 
     } catch (err: any) {
-      // Clean string logging mapping handles the native JavaScript {} log crash error
       console.error("Team assignment pipeline data sync fault:", err?.message || err);
       toast.error("Failed to sync pools or team registry matrices.");
     } finally {
@@ -74,14 +79,15 @@ export default function TeamAssignmentPage() {
     }
   }
 
-  // Assign a target team to an allocation pool cluster
-  async function allocateTeamToPool(teamId: number, poolId: number | null) {
+  // Assign a target team to a text allocation pool cluster title
+  async function allocateTeamToPool(teamId: string, poolNameTarget: string | null) {
     try {
       setSubmittingId(teamId);
       
+      // Target pool_name directly matching database column architecture rule parameters
       const { error } = await supabase
         .from("teams")
-        .update({ pool_id: poolId })
+        .update({ pool_name: poolNameTarget })
         .eq("id", teamId);
 
       if (error) throw error;
@@ -89,7 +95,7 @@ export default function TeamAssignmentPage() {
       toast.success("Team distribution matrix updated.");
       
       // Update local state smoothly without a hard loading flicker
-      setTeams(prev => prev.map(t => t.id === teamId ? { ...t, pool_id: poolId } : t));
+      setTeams(prev => prev.map(t => t.id === teamId ? { ...t, pool_name: poolNameTarget } : t));
     } catch (err: any) {
       console.error("Critical team re-allocation error:", err?.message || err);
       toast.error(`Allocation fault: ${err.message}`);
@@ -113,7 +119,10 @@ export default function TeamAssignmentPage() {
     );
   }
 
-  const unassignedTeams = teams.filter(t => t.pool_id === null);
+  // Check for null or explicitly "unassigned" flag entries from database rows
+  const unassignedTeams = teams.filter(
+    t => !t.pool_name || t.pool_name.trim().toLowerCase() === "unassigned"
+  );
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
@@ -165,7 +174,7 @@ export default function TeamAssignmentPage() {
                           <button
                             key={pool.id}
                             disabled={submittingId !== null}
-                            onClick={() => allocateTeamToPool(team.id, pool.id)}
+                            onClick={() => allocateTeamToPool(team.id, pool.name)}
                             className="text-[10px] font-bold px-2 py-1 rounded bg-slate-50 hover:bg-[#EEEDFE] border border-slate-200 hover:border-[#534AB7]/30 text-slate-600 hover:text-[#3C3489] transition-all flex items-center gap-1"
                           >
                             <span>Join {pool.name}</span>
@@ -198,13 +207,19 @@ export default function TeamAssignmentPage() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {pools.map((pool) => {
-                    const assignedTeams = teams.filter(t => t.pool_id === pool.id);
+                    // Match assigned teams securely using text-based values safely
+                    const assignedTeams = teams.filter(
+                      t => t.pool_name?.trim().toLowerCase() === pool.name?.trim().toLowerCase()
+                    );
                     
                     return (
                       <div key={pool.id} className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50/30">
                         <div className="px-3 py-2 bg-slate-100/70 border-b border-slate-200 flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-800">{pool.name}</span>
-                          <span className="text-[10px] font-semibold text-slate-400">{assignedTeams.length} Registered</span>
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-slate-800">{pool.name}</span>
+                            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wider">{pool.category} Division</span>
+                          </div>
+                          <span className="text-[10px] font-semibold text-slate-400">{assignedTeams.length} Assigned</span>
                         </div>
                         
                         <div className="p-2 space-y-1 min-h-[100px]">
@@ -215,7 +230,8 @@ export default function TeamAssignmentPage() {
                               <div key={team.id} className="flex items-center justify-between p-1.5 bg-white border border-slate-100 rounded text-xs font-medium text-slate-700 shadow-none">
                                 <span className="truncate max-w-[140px] font-semibold">{team.name}</span>
                                 <button
-                                  onClick={() => allocateTeamToPool(team.id, null)}
+                                  disabled={submittingId !== null}
+                                  onClick={() => allocateTeamToPool(team.id, "Unassigned")}
                                   className="text-[9px] font-bold text-rose-600 hover:bg-rose-50 px-1.5 py-0.5 rounded transition-colors"
                                 >
                                   Eject
